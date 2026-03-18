@@ -26,9 +26,13 @@ type Dashboard struct {
 	issuesTable  *tview.Table
 	detailView   *tview.TextView
 	blockedTable *tview.Table
+	chartsView   *tview.TextView
 	epicsView    *tview.TextView
 	daemonsView  *tview.TextView
 	footer       *tview.TextView
+
+	helpView *tview.TextView
+	pages    *tview.Pages
 
 	data *AggregateData
 	mu   sync.RWMutex
@@ -114,6 +118,11 @@ func (d *Dashboard) buildUI() {
 		SetTitle(" Blocked ").
 		SetTitleAlign(tview.AlignLeft)
 
+	d.chartsView = tview.NewTextView().SetDynamicColors(true)
+	d.chartsView.SetBorder(true).
+		SetTitle(" Charts ").
+		SetTitleAlign(tview.AlignLeft)
+
 	d.epicsView = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
 	d.epicsView.SetBorder(true).
 		SetTitle(" Epics ").
@@ -128,16 +137,22 @@ func (d *Dashboard) buildUI() {
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
 
+	d.helpView = tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignLeft)
+	d.helpView.SetBorder(true).
+		SetTitle(" Help ").
+		SetTitleAlign(tview.AlignCenter)
+
 	d.applyTheme()
 
 	t := &d.theme
 	d.header.SetText(fmt.Sprintf(
-		" [%s::b]BEADS-PANE[-::-] [%s]◆[-] Agent Control Pane         [%s]loading...[-]",
-		t.HeaderTag, t.FgTag, t.DimTag))
-	d.footer.SetText(fmt.Sprintf(
-		" [%s]q[-]:quit  [%s]r[-]:refresh  [%s]t[-]:theme  [%s]Tab[-]:pane  [%s]↑↓[-]:nav",
-		t.DimTag, t.DimTag, t.DimTag, t.DimTag, t.DimTag))
+		" [%s::b]BEADS-PANE[-::-] [%s]◆[-] Agent Control Pane         [%s]loading...[-]  [%s::b]h[-::-][%s]:help[-]",
+		t.HeaderTag, t.FgTag, t.DimTag, t.AccentTag, t.DimTag))
+	d.renderFooter()
 	d.detailView.SetText(fmt.Sprintf(" [%s]Select an issue to view details[-]", t.DimTag))
+	d.chartsView.SetText(fmt.Sprintf(" [%s]Waiting for data...[-]", t.DimTag))
 
 	leftPanel := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(d.reposList, 0, 3, true).
@@ -153,6 +168,7 @@ func (d *Dashboard) buildUI() {
 		AddItem(d.issuesTable, 0, 3, false).
 		AddItem(d.detailView, 0, 2, false).
 		AddItem(d.blockedTable, 0, 2, false).
+		AddItem(d.chartsView, 5, 0, false).
 		AddItem(bottomRight, 0, 1, false)
 
 	mainArea := tview.NewFlex().SetDirection(tview.FlexColumn).
@@ -183,7 +199,29 @@ func (d *Dashboard) buildUI() {
 		}
 	})
 
+	helpModal := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
+			AddItem(nil, 0, 1, false).
+			AddItem(d.helpView, 55, 0, true).
+			AddItem(nil, 0, 1, false), 18, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	d.pages = tview.NewPages().
+		AddPage("main", root, true, true).
+		AddPage("help", helpModal, true, false)
+
+	d.renderHelpContent()
+
 	d.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			front, _ := d.pages.GetFrontPage()
+			if front == "help" {
+				d.pages.HidePage("help")
+				return nil
+			}
+		}
+
 		switch event.Key() {
 		case tcell.KeyTab:
 			d.focusIndex = (d.focusIndex + 1) % len(d.focusables)
@@ -204,12 +242,52 @@ func (d *Dashboard) buildUI() {
 			case 't':
 				d.toggleTheme()
 				return nil
+			case 'h':
+				front, _ := d.pages.GetFrontPage()
+				if front == "help" {
+					d.pages.HidePage("help")
+				} else {
+					d.renderHelpContent()
+					d.pages.ShowPage("help")
+				}
+				return nil
 			}
 		}
 		return event
 	})
 
-	d.app.SetRoot(root, true)
+	d.app.SetRoot(d.pages, true)
+}
+
+func (d *Dashboard) renderFooter() {
+	t := &d.theme
+	d.footer.SetText(fmt.Sprintf(
+		" [%s]q[-]:quit  [%s]r[-]:refresh  [%s]t[-]:theme  [%s]h[-]:help  [%s]Tab[-]:pane  [%s]↑↓[-]:nav",
+		t.DimTag, t.DimTag, t.DimTag, t.DimTag, t.DimTag, t.DimTag))
+}
+
+func (d *Dashboard) renderHelpContent() {
+	t := &d.theme
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "  [%s::b]Keyboard Shortcuts[-::-]\n\n", t.HeaderTag)
+	fmt.Fprintf(&b, "  [%s::b]q[-::-]             Quit\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]r[-::-]             Force refresh now\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]t[-::-]             Toggle light / dark theme\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]h[-::-]             Show / hide this help\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]Tab[-::-]           Next panel (repos→issues→blocked)\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]Shift+Tab[-::-]     Previous panel\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]↑  ↓[-::-]          Navigate within panel\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]Enter[-::-]         Select item\n", t.AccentTag)
+	fmt.Fprintf(&b, "  [%s::b]Esc[-::-]           Close this help\n", t.AccentTag)
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "  [%s]All access is read-only. Polls every %ds.[-]\n", t.DimTag, d.config.PollIntervalSec)
+
+	d.helpView.SetText(b.String())
+	d.helpView.SetBackgroundColor(t.Bg)
+	d.helpView.SetBorderColor(t.Border)
+	d.helpView.SetTitleColor(t.Fg)
+	d.helpView.SetTextColor(t.Fg)
 }
 
 func (d *Dashboard) applyTheme() {
@@ -217,7 +295,7 @@ func (d *Dashboard) applyTheme() {
 
 	for _, tv := range []*tview.TextView{
 		d.header, d.statsView, d.priorityView, d.labelsView,
-		d.detailView, d.epicsView, d.daemonsView, d.footer,
+		d.detailView, d.chartsView, d.epicsView, d.daemonsView, d.footer,
 	} {
 		tv.SetBackgroundColor(t.Bg)
 		tv.SetTextColor(t.Fg)
@@ -249,11 +327,7 @@ func (d *Dashboard) toggleTheme() {
 		d.theme = newDarkTheme()
 	}
 	d.applyTheme()
-
-	t := &d.theme
-	d.footer.SetText(fmt.Sprintf(
-		" [%s]q[-]:quit  [%s]r[-]:refresh  [%s]t[-]:theme  [%s]Tab[-]:pane  [%s]↑↓[-]:nav",
-		t.DimTag, t.DimTag, t.DimTag, t.DimTag, t.DimTag))
+	d.renderFooter()
 
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -266,6 +340,7 @@ func (d *Dashboard) toggleTheme() {
 		d.refreshIssuesTable()
 		d.setDetailText(-1)
 		d.updateBlockedTable()
+		d.updateChartsView()
 		d.updateEpicsView()
 		d.updateDaemonsView()
 	}
@@ -311,6 +386,7 @@ func (d *Dashboard) poll() {
 		d.updateLabelsView()
 		d.refreshIssuesTable()
 		d.updateBlockedTable()
+		d.updateChartsView()
 		d.updateEpicsView()
 		d.updateDaemonsView()
 	})
@@ -328,8 +404,8 @@ func (d *Dashboard) updateHeader() {
 		mode = "dark"
 	}
 	d.header.SetText(fmt.Sprintf(
-		" [%s::b]BEADS-PANE[-::-] [%s]◆[-] Agent Control Pane       [%s]%d repos │ poll %ds │ %s │ %s[-]",
-		t.HeaderTag, t.FgTag, t.DimTag, len(d.data.Repos), d.config.PollIntervalSec, mode, now,
+		" [%s::b]BEADS-PANE[-::-] [%s]◆[-] Agent Control Pane       [%s]%d repos │ poll %ds │ %s │ %s[-]  [%s::b]h[-::-][%s]:help[-]",
+		t.HeaderTag, t.FgTag, t.DimTag, len(d.data.Repos), d.config.PollIntervalSec, mode, now, t.AccentTag, t.DimTag,
 	))
 }
 
@@ -557,6 +633,10 @@ func (d *Dashboard) updateBlockedTable() {
 			tview.NewTableCell(fmt.Sprintf("[%s]No blocked issues[-]", t.DimTag)).
 				SetSelectable(false).SetExpansion(1))
 	}
+}
+
+func (d *Dashboard) updateChartsView() {
+	d.chartsView.SetText(renderCharts(d.data.Repos, &d.theme))
 }
 
 func (d *Dashboard) updateEpicsView() {

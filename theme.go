@@ -129,7 +129,7 @@ func newLightTheme() Theme {
 		Border:   tcell.NewRGBColor(190, 190, 190),
 		SelectBg: tcell.NewRGBColor(210, 222, 240),
 		Accent:   tcell.NewRGBColor(50, 100, 120),
-		Dim:      tcell.NewRGBColor(145, 145, 145),
+		Dim:      tcell.NewRGBColor(100, 100, 100),
 		Header:   tcell.NewRGBColor(180, 130, 0),
 		Open:     tcell.NewRGBColor(20, 130, 20),
 		InProg:   tcell.NewRGBColor(40, 70, 190),
