@@ -1,0 +1,14 @@
+# Binary
+beads-pane
+/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
