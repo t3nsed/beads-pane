@@ -1,20 +1,22 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 )
 
 func main() {
-	// Verify bd CLI is installed.
+	themeFlag := flag.String("theme", "light", "color theme: light or dark")
+	flag.Parse()
+
 	if _, err := exec.LookPath("bd"); err != nil {
 		fmt.Fprintln(os.Stderr, "Error: 'bd' command not found.")
 		fmt.Fprintln(os.Stderr, "Install beads: https://github.com/steveyegge/beads")
 		os.Exit(1)
 	}
 
-	// Load existing config or run first-time setup.
 	cfg, err := loadConfig()
 	if err != nil {
 		cfg, err = firstRunSetup()
@@ -24,7 +26,6 @@ func main() {
 		}
 	}
 
-	// Discover .beads repositories.
 	beadsDirs := scanForBeads(cfg.ScanRoots, cfg.MaxScanDepth)
 	if len(beadsDirs) == 0 {
 		fmt.Fprintln(os.Stderr, "No .beads directories found in configured scan roots.")
@@ -35,8 +36,7 @@ func main() {
 
 	fmt.Printf("Found %d beads repo(s). Starting dashboard...\n", len(beadsDirs))
 
-	// Build and run the TUI.
-	dashboard := NewDashboard(cfg, beadsDirs)
+	dashboard := NewDashboard(cfg, beadsDirs, *themeFlag)
 	if err := dashboard.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

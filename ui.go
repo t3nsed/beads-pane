@@ -11,14 +11,13 @@ import (
 	"github.com/rivo/tview"
 )
 
-// Dashboard is the main TUI application.
 type Dashboard struct {
 	config    *Config
 	beadsDirs []string
 
-	app *tview.Application
+	app   *tview.Application
+	theme Theme
 
-	// Panels
 	header       *tview.TextView
 	reposList    *tview.List
 	statsView    *tview.TextView
@@ -31,32 +30,32 @@ type Dashboard struct {
 	daemonsView  *tview.TextView
 	footer       *tview.TextView
 
-	// Data
 	data *AggregateData
 	mu   sync.RWMutex
 
-	// State
 	selectedRepo int
 	focusIndex   int
 	focusables   []tview.Primitive
 
-	// Lifecycle
 	stopChan chan struct{}
 }
 
-// NewDashboard creates and wires the entire TUI.
-func NewDashboard(cfg *Config, beadsDirs []string) *Dashboard {
+func NewDashboard(cfg *Config, beadsDirs []string, themeName string) *Dashboard {
 	d := &Dashboard{
 		config:    cfg,
 		beadsDirs: beadsDirs,
 		app:       tview.NewApplication(),
 		stopChan:  make(chan struct{}),
 	}
+	if themeName == "dark" {
+		d.theme = newDarkTheme()
+	} else {
+		d.theme = newLightTheme()
+	}
 	d.buildUI()
 	return d
 }
 
-// Run starts polling and enters the tview event loop (blocks).
 func (d *Dashboard) Run() error {
 	go d.startPolling()
 	err := d.app.Run()
@@ -64,108 +63,81 @@ func (d *Dashboard) Run() error {
 	return err
 }
 
-// -------------------------------------------------------------------------
-// UI construction
-// -------------------------------------------------------------------------
-
 func (d *Dashboard) buildUI() {
-	// Header
 	d.header = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignLeft)
 
-	// Repos list (left sidebar, top)
 	d.reposList = tview.NewList().
 		ShowSecondaryText(true).
-		SetHighlightFullLine(true).
-		SetSelectedBackgroundColor(tcell.NewRGBColor(40, 50, 65))
+		SetHighlightFullLine(true)
 	d.reposList.SetBorder(true).
 		SetTitle(" Repositories ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
+		SetTitleAlign(tview.AlignLeft)
 
-	// Aggregate stats
 	d.statsView = tview.NewTextView().SetDynamicColors(true)
 	d.statsView.SetBorder(true).
 		SetTitle(" Aggregate ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
+		SetTitleAlign(tview.AlignLeft)
 
-	// Priority distribution
 	d.priorityView = tview.NewTextView().SetDynamicColors(true)
 	d.priorityView.SetBorder(true).
 		SetTitle(" Priority ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
+		SetTitleAlign(tview.AlignLeft)
 
-	// Labels
 	d.labelsView = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
 	d.labelsView.SetBorder(true).
 		SetTitle(" Labels ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
+		SetTitleAlign(tview.AlignLeft)
 
-	// Issues table (right, top)
 	d.issuesTable = tview.NewTable().
 		SetSelectable(true, false).
 		SetFixed(1, 0).
 		SetSeparator(' ')
 	d.issuesTable.SetBorder(true).
 		SetTitle(" Issues ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
-	d.issuesTable.SetSelectedStyle(tcell.StyleDefault.
-		Background(tcell.NewRGBColor(40, 50, 65)).
-		Foreground(tcell.ColorWhite))
+		SetTitleAlign(tview.AlignLeft)
 
-	// Detail
 	d.detailView = tview.NewTextView().
 		SetDynamicColors(true).
 		SetWordWrap(true).
 		SetScrollable(true)
 	d.detailView.SetBorder(true).
 		SetTitle(" Detail ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
+		SetTitleAlign(tview.AlignLeft)
 
-	// Blocked table
 	d.blockedTable = tview.NewTable().
 		SetSelectable(true, false).
 		SetFixed(1, 0).
 		SetSeparator(' ')
 	d.blockedTable.SetBorder(true).
 		SetTitle(" Blocked ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
-	d.blockedTable.SetSelectedStyle(tcell.StyleDefault.
-		Background(tcell.NewRGBColor(40, 50, 65)).
-		Foreground(tcell.ColorWhite))
+		SetTitleAlign(tview.AlignLeft)
 
-	// Epics
 	d.epicsView = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
 	d.epicsView.SetBorder(true).
 		SetTitle(" Epics ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
+		SetTitleAlign(tview.AlignLeft)
 
-	// Daemons
 	d.daemonsView = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
 	d.daemonsView.SetBorder(true).
 		SetTitle(" Daemons ").
-		SetTitleAlign(tview.AlignLeft).
-		SetBorderColor(tcell.ColorDimGray)
+		SetTitleAlign(tview.AlignLeft)
 
-	// Footer
 	d.footer = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
 
-	// Initial placeholder content
-	d.header.SetText(" [yellow::b]BEADS-PANE[-::-] [white]◆[-] Agent Control Pane         [dim]loading...[-]")
-	d.footer.SetText(" [dim]q[-]:quit  [dim]r[-]:refresh  [dim]Tab[-]:next pane  [dim]↑↓[-]:navigate  [dim]Enter[-]:select")
-	d.detailView.SetText(" [dim]Select an issue to view details[-]")
+	d.applyTheme()
 
-	// --- Layout -----------------------------------------------------------
+	t := &d.theme
+	d.header.SetText(fmt.Sprintf(
+		" [%s::b]BEADS-PANE[-::-] [%s]◆[-] Agent Control Pane         [%s]loading...[-]",
+		t.HeaderTag, t.FgTag, t.DimTag))
+	d.footer.SetText(fmt.Sprintf(
+		" [%s]q[-]:quit  [%s]r[-]:refresh  [%s]t[-]:theme  [%s]Tab[-]:pane  [%s]↑↓[-]:nav",
+		t.DimTag, t.DimTag, t.DimTag, t.DimTag, t.DimTag))
+	d.detailView.SetText(fmt.Sprintf(" [%s]Select an issue to view details[-]", t.DimTag))
 
 	leftPanel := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(d.reposList, 0, 3, true).
@@ -192,12 +164,8 @@ func (d *Dashboard) buildUI() {
 		AddItem(mainArea, 0, 1, true).
 		AddItem(d.footer, 1, 0, false)
 
-	// --- Focus cycling ----------------------------------------------------
-
 	d.focusables = []tview.Primitive{d.reposList, d.issuesTable, d.blockedTable}
 	d.focusIndex = 0
-
-	// --- Callbacks --------------------------------------------------------
 
 	d.reposList.SetChangedFunc(func(index int, _ string, _ string, _ rune) {
 		d.selectedRepo = index
@@ -214,8 +182,6 @@ func (d *Dashboard) buildUI() {
 			d.setDetailText(row - 1)
 		}
 	})
-
-	// --- Global keys ------------------------------------------------------
 
 	d.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -235,12 +201,74 @@ func (d *Dashboard) buildUI() {
 			case 'r':
 				go d.poll()
 				return nil
+			case 't':
+				d.toggleTheme()
+				return nil
 			}
 		}
 		return event
 	})
 
 	d.app.SetRoot(root, true)
+}
+
+func (d *Dashboard) applyTheme() {
+	t := &d.theme
+
+	for _, tv := range []*tview.TextView{
+		d.header, d.statsView, d.priorityView, d.labelsView,
+		d.detailView, d.epicsView, d.daemonsView, d.footer,
+	} {
+		tv.SetBackgroundColor(t.Bg)
+		tv.SetTextColor(t.Fg)
+		tv.SetBorderColor(t.Border)
+		tv.SetTitleColor(t.Fg)
+	}
+
+	d.reposList.SetBackgroundColor(t.Bg)
+	d.reposList.SetMainTextColor(t.Fg)
+	d.reposList.SetSecondaryTextColor(t.Dim)
+	d.reposList.SetSelectedBackgroundColor(t.SelectBg)
+	d.reposList.SetSelectedTextColor(t.Fg)
+	d.reposList.SetBorderColor(t.Border)
+	d.reposList.SetTitleColor(t.Fg)
+
+	selStyle := tcell.StyleDefault.Background(t.SelectBg).Foreground(t.Fg)
+	for _, tbl := range []*tview.Table{d.issuesTable, d.blockedTable} {
+		tbl.SetBackgroundColor(t.Bg)
+		tbl.SetBorderColor(t.Border)
+		tbl.SetTitleColor(t.Fg)
+		tbl.SetSelectedStyle(selStyle)
+	}
+}
+
+func (d *Dashboard) toggleTheme() {
+	if d.theme.IsDark {
+		d.theme = newLightTheme()
+	} else {
+		d.theme = newDarkTheme()
+	}
+	d.applyTheme()
+
+	t := &d.theme
+	d.footer.SetText(fmt.Sprintf(
+		" [%s]q[-]:quit  [%s]r[-]:refresh  [%s]t[-]:theme  [%s]Tab[-]:pane  [%s]↑↓[-]:nav",
+		t.DimTag, t.DimTag, t.DimTag, t.DimTag, t.DimTag))
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.data != nil {
+		d.updateHeader()
+		d.updateReposList()
+		d.updateStatsView()
+		d.updatePriorityView()
+		d.updateLabelsView()
+		d.refreshIssuesTable()
+		d.setDetailText(-1)
+		d.updateBlockedTable()
+		d.updateEpicsView()
+		d.updateDaemonsView()
+	}
 }
 
 // -------------------------------------------------------------------------
@@ -289,18 +317,24 @@ func (d *Dashboard) poll() {
 }
 
 // -------------------------------------------------------------------------
-// Panel renderers (caller must hold at least mu.RLock)
+// Panel renderers (caller must hold mu.RLock)
 // -------------------------------------------------------------------------
 
 func (d *Dashboard) updateHeader() {
+	t := &d.theme
 	now := d.data.LastPoll.Format("15:04:05")
+	mode := "light"
+	if t.IsDark {
+		mode = "dark"
+	}
 	d.header.SetText(fmt.Sprintf(
-		" [yellow::b]BEADS-PANE[-::-] [white]◆[-] Agent Control Pane       [dim]%d repos │ poll %ds │ %s[-]",
-		len(d.data.Repos), d.config.PollIntervalSec, now,
+		" [%s::b]BEADS-PANE[-::-] [%s]◆[-] Agent Control Pane       [%s]%d repos │ poll %ds │ %s │ %s[-]",
+		t.HeaderTag, t.FgTag, t.DimTag, len(d.data.Repos), d.config.PollIntervalSec, mode, now,
 	))
 }
 
 func (d *Dashboard) updateReposList() {
+	t := &d.theme
 	prev := d.reposList.GetCurrentItem()
 	d.reposList.Clear()
 
@@ -310,14 +344,14 @@ func (d *Dashboard) updateReposList() {
 			total = repo.Stats.TotalIssues
 			active = repo.Stats.OpenIssues + repo.Stats.InProgressIssues
 		}
-		main := fmt.Sprintf(" %s", repo.Name)
+		mainText := fmt.Sprintf(" %s", repo.Name)
 		var sec string
 		if repo.Error != nil {
-			sec = "   [red]error[-]"
+			sec = fmt.Sprintf("   [%s]error[-]", t.BlockedTag)
 		} else {
-			sec = fmt.Sprintf("   [dim]%d total, %d active[-]", total, active)
+			sec = fmt.Sprintf("   [%s]%d total, %d active[-]", t.DimTag, total, active)
 		}
-		d.reposList.AddItem(main, sec, 0, nil)
+		d.reposList.AddItem(mainText, sec, 0, nil)
 	}
 
 	if prev >= 0 && prev < d.reposList.GetItemCount() {
@@ -326,32 +360,34 @@ func (d *Dashboard) updateReposList() {
 }
 
 func (d *Dashboard) updateStatsView() {
+	t := &d.theme
 	a := d.data
 	var b strings.Builder
-	fmt.Fprintf(&b, " [white::b]Total[-::-]       %d\n", a.TotalIssues)
-	fmt.Fprintf(&b, " [green]Open[-]        %d\n", a.TotalOpen)
-	fmt.Fprintf(&b, " [#5f87ff]In Prog[-]     %d\n", a.TotalInProgress)
-	fmt.Fprintf(&b, " [red]Blocked[-]     %d\n", a.TotalBlocked)
-	fmt.Fprintf(&b, " [#888888]Closed[-]      %d\n", a.TotalClosed)
-	fmt.Fprintf(&b, " [green::b]Ready[-::-]       %d\n", a.TotalReady)
-	fmt.Fprintf(&b, " [dim]Lead Time  %s avg[-]", formatHours(a.AvgLeadTime))
+	fmt.Fprintf(&b, " [%s::b]Total[-::-]       %d\n", t.FgTag, a.TotalIssues)
+	fmt.Fprintf(&b, " [%s]Open[-]        %d\n", t.OpenTag, a.TotalOpen)
+	fmt.Fprintf(&b, " [%s]In Prog[-]     %d\n", t.InProgTag, a.TotalInProgress)
+	fmt.Fprintf(&b, " [%s]Blocked[-]     %d\n", t.BlockedTag, a.TotalBlocked)
+	fmt.Fprintf(&b, " [%s]Closed[-]      %d\n", t.ClosedTag, a.TotalClosed)
+	fmt.Fprintf(&b, " [%s::b]Ready[-::-]       %d\n", t.ReadyTag, a.TotalReady)
+	fmt.Fprintf(&b, " [%s]Lead Time  %s avg[-]", t.DimTag, formatHours(a.AvgLeadTime))
 	d.statsView.SetText(b.String())
 }
 
 func (d *Dashboard) updatePriorityView() {
+	t := &d.theme
 	var b strings.Builder
 	labels := [5]string{"Critical", "High", "Medium", "Low", "Backlog"}
-	colors := [5]string{"red", "#ff8700", "yellow", "green", "#888888"}
 	markers := [5]string{"■", "■", "■", "■", "□"}
 
 	for i := 0; i < 5; i++ {
-		fmt.Fprintf(&b, " [%s]%s[-] %-9s [white]%3d[-]\n",
-			colors[i], markers[i], labels[i], d.data.PriorityDist[i])
+		fmt.Fprintf(&b, " [%s]%s[-] %-9s [%s]%3d[-]\n",
+			t.PriTag[i], markers[i], labels[i], t.FgTag, d.data.PriorityDist[i])
 	}
 	d.priorityView.SetText(b.String())
 }
 
 func (d *Dashboard) updateLabelsView() {
+	t := &d.theme
 	var b strings.Builder
 	max := 14
 	if len(d.data.AllLabels) < max {
@@ -359,21 +395,21 @@ func (d *Dashboard) updateLabelsView() {
 	}
 	for i := 0; i < max; i++ {
 		lc := d.data.AllLabels[i]
-		fmt.Fprintf(&b, " [#87afaf]%-15s[-] [white]%3d[-]\n", truncate(lc.Label, 15), lc.Count)
+		fmt.Fprintf(&b, " [%s]%-15s[-] [%s]%3d[-]\n", t.AccentTag, truncate(lc.Label, 15), t.FgTag, lc.Count)
 	}
 	if len(d.data.AllLabels) > max {
-		fmt.Fprintf(&b, " [dim]... %d more[-]", len(d.data.AllLabels)-max)
+		fmt.Fprintf(&b, " [%s]... %d more[-]", t.DimTag, len(d.data.AllLabels)-max)
 	}
 	d.labelsView.SetText(b.String())
 }
 
 func (d *Dashboard) refreshIssuesTable() {
+	t := &d.theme
 	d.issuesTable.Clear()
 
-	// Header row
 	for i, h := range []string{"ID", "Title", "Status", "Pri", "Type"} {
 		cell := tview.NewTableCell(h).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(t.Header).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)
 		if i == 1 {
@@ -406,55 +442,32 @@ func (d *Dashboard) refreshIssuesTable() {
 		}
 
 		d.issuesTable.SetCell(row, 0,
-			tview.NewTableCell(truncate(issue.ID, 20)).SetMaxWidth(20).
-				SetTextColor(tcell.ColorWhite))
-
+			tview.NewTableCell(truncate(issue.ID, 20)).SetMaxWidth(20).SetTextColor(t.Fg))
 		d.issuesTable.SetCell(row, 1,
-			tview.NewTableCell(truncate(issue.Title, 50)).SetExpansion(1).
-				SetTextColor(tcell.ColorWhite))
-
-		stCell := tview.NewTableCell(statusLabel(issue.Status)).SetMaxWidth(8)
-		switch issue.Status {
-		case "open":
-			stCell.SetTextColor(tcell.ColorGreen)
-		case "in_progress":
-			stCell.SetTextColor(tcell.NewRGBColor(95, 135, 255))
-		case "blocked":
-			stCell.SetTextColor(tcell.ColorRed)
-		}
-		d.issuesTable.SetCell(row, 2, stCell)
-
-		prCell := tview.NewTableCell(priorityName(issue.Priority)).SetMaxWidth(4)
-		switch issue.Priority {
-		case 0:
-			prCell.SetTextColor(tcell.ColorRed)
-		case 1:
-			prCell.SetTextColor(tcell.NewRGBColor(255, 135, 0))
-		case 2:
-			prCell.SetTextColor(tcell.ColorYellow)
-		case 3:
-			prCell.SetTextColor(tcell.ColorGreen)
-		default:
-			prCell.SetTextColor(tcell.ColorGray)
-		}
-		d.issuesTable.SetCell(row, 3, prCell)
-
+			tview.NewTableCell(truncate(issue.Title, 50)).SetExpansion(1).SetTextColor(t.Fg))
+		d.issuesTable.SetCell(row, 2,
+			tview.NewTableCell(statusLabel(issue.Status)).SetMaxWidth(8).
+				SetTextColor(t.StatusColor(issue.Status)))
+		d.issuesTable.SetCell(row, 3,
+			tview.NewTableCell(priorityName(issue.Priority)).SetMaxWidth(4).
+				SetTextColor(t.PriColor(issue.Priority)))
 		d.issuesTable.SetCell(row, 4,
-			tview.NewTableCell(typeLabel(issue.IssueType)).SetMaxWidth(6).
-				SetTextColor(tcell.ColorWhite))
+			tview.NewTableCell(typeLabel(issue.IssueType)).SetMaxWidth(6).SetTextColor(t.Fg))
 
 		row++
 	}
 
 	if row == 1 {
 		d.issuesTable.SetCell(1, 0,
-			tview.NewTableCell("[dim]No active issues[-]").SetSelectable(false).SetExpansion(1))
+			tview.NewTableCell(fmt.Sprintf("[%s]No active issues[-]", t.DimTag)).
+				SetSelectable(false).SetExpansion(1))
 	}
 }
 
 func (d *Dashboard) setDetailText(issueIdx int) {
+	t := &d.theme
 	if d.data == nil || len(d.data.Repos) == 0 {
-		d.detailView.SetText(" [dim]Select an issue to view details[-]")
+		d.detailView.SetText(fmt.Sprintf(" [%s]Select an issue to view details[-]", t.DimTag))
 		return
 	}
 	idx := d.selectedRepo
@@ -471,15 +484,18 @@ func (d *Dashboard) setDetailText(issueIdx int) {
 	}
 
 	if issueIdx < 0 || issueIdx >= len(active) {
-		d.detailView.SetText(" [dim]Select an issue to view details[-]")
+		d.detailView.SetText(fmt.Sprintf(" [%s]Select an issue to view details[-]", t.DimTag))
 		return
 	}
 
 	iss := active[issueIdx]
 	var b strings.Builder
-	fmt.Fprintf(&b, " [yellow::b]%s[-::-] [white]◆[-] %s\n\n", iss.ID, iss.Title)
-	fmt.Fprintf(&b, " [%s]%s[-]", statusColor(iss.Status), statusLabel(iss.Status))
-	fmt.Fprintf(&b, "  │  [%s]%s %s[-]", priorityColor(iss.Priority), priorityName(iss.Priority), priorityLabel(iss.Priority))
+	fmt.Fprintf(&b, " [%s::b]%s[-::-] [%s]◆[-] %s\n\n", t.HeaderTag, iss.ID, t.FgTag, iss.Title)
+	fmt.Fprintf(&b, " [%s]%s[-]", t.StatusTag(iss.Status), statusLabel(iss.Status))
+	pri := iss.Priority
+	if pri >= 0 && pri <= 4 {
+		fmt.Fprintf(&b, "  │  [%s]%s %s[-]", t.PriTag[pri], priorityName(pri), priorityLabel(pri))
+	}
 	fmt.Fprintf(&b, "  │  %s\n", iss.IssueType)
 	fmt.Fprintf(&b, " Created: %s  │  Updated: %s\n", parseShortDate(iss.CreatedAt), parseShortDate(iss.UpdatedAt))
 
@@ -493,7 +509,7 @@ func (d *Dashboard) setDetailText(issueIdx int) {
 		fmt.Fprintf(&b, " Labels: %s\n", strings.Join(iss.Labels, ", "))
 	}
 	if len(iss.BlockedBy) > 0 {
-		fmt.Fprintf(&b, " [red]Blocked by: %s[-]\n", strings.Join(iss.BlockedBy, ", "))
+		fmt.Fprintf(&b, " [%s]Blocked by: %s[-]\n", t.BlockedTag, strings.Join(iss.BlockedBy, ", "))
 	}
 
 	desc := strings.TrimSpace(iss.Description)
@@ -505,12 +521,12 @@ func (d *Dashboard) setDetailText(issueIdx int) {
 }
 
 func (d *Dashboard) updateBlockedTable() {
+	t := &d.theme
 	d.blockedTable.Clear()
 
-	headers := []string{"Repo", "ID", "Title", "Blocked By"}
-	for i, h := range headers {
+	for i, h := range []string{"Repo", "ID", "Title", "Blocked By"} {
 		cell := tview.NewTableCell(h).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(t.Header).
 			SetSelectable(false).
 			SetAttributes(tcell.AttrBold)
 		if i == 2 {
@@ -526,31 +542,28 @@ func (d *Dashboard) updateBlockedTable() {
 	for i, bi := range d.data.AllBlocked {
 		row := i + 1
 		d.blockedTable.SetCell(row, 0,
-			tview.NewTableCell(truncate(bi.RepoName, 14)).SetMaxWidth(14).
-				SetTextColor(tcell.NewRGBColor(135, 175, 175)))
+			tview.NewTableCell(truncate(bi.RepoName, 14)).SetMaxWidth(14).SetTextColor(t.Accent))
 		d.blockedTable.SetCell(row, 1,
-			tview.NewTableCell(truncate(bi.Issue.ID, 20)).SetMaxWidth(20).
-				SetTextColor(tcell.ColorWhite))
+			tview.NewTableCell(truncate(bi.Issue.ID, 20)).SetMaxWidth(20).SetTextColor(t.Fg))
 		d.blockedTable.SetCell(row, 2,
-			tview.NewTableCell(truncate(bi.Issue.Title, 40)).SetExpansion(1).
-				SetTextColor(tcell.ColorWhite))
-
+			tview.NewTableCell(truncate(bi.Issue.Title, 40)).SetExpansion(1).SetTextColor(t.Fg))
 		blockers := strings.Join(bi.Issue.BlockedBy, ", ")
 		d.blockedTable.SetCell(row, 3,
-			tview.NewTableCell(truncate(blockers, 30)).SetMaxWidth(30).
-				SetTextColor(tcell.ColorRed))
+			tview.NewTableCell(truncate(blockers, 30)).SetMaxWidth(30).SetTextColor(t.Blocked))
 	}
 
 	if len(d.data.AllBlocked) == 0 {
 		d.blockedTable.SetCell(1, 0,
-			tview.NewTableCell("[dim]No blocked issues[-]").SetSelectable(false).SetExpansion(1))
+			tview.NewTableCell(fmt.Sprintf("[%s]No blocked issues[-]", t.DimTag)).
+				SetSelectable(false).SetExpansion(1))
 	}
 }
 
 func (d *Dashboard) updateEpicsView() {
+	t := &d.theme
 	var b strings.Builder
 	if len(d.data.AllEpics) == 0 {
-		b.WriteString(" [dim]No epics[-]")
+		fmt.Fprintf(&b, " [%s]No epics[-]", t.DimTag)
 	}
 
 	for _, ew := range d.data.AllEpics {
@@ -558,33 +571,35 @@ func (d *Dashboard) updateEpicsView() {
 		if ew.TotalChildren > 0 {
 			pct = ew.ClosedChildren * 100 / ew.TotalChildren
 		}
-		bar := progressBar(pct, 20)
-		fmt.Fprintf(&b, " [#87afaf]%s[-]\n", ew.RepoName)
-		fmt.Fprintf(&b, " [yellow]%s[-] %s\n", ew.Epic.ID, truncate(ew.Epic.Title, 40))
+		bar := d.progressBar(pct, 20)
+		fmt.Fprintf(&b, " [%s]%s[-]\n", t.AccentTag, ew.RepoName)
+		fmt.Fprintf(&b, " [%s]%s[-] %s\n", t.HeaderTag, ew.Epic.ID, truncate(ew.Epic.Title, 40))
 		fmt.Fprintf(&b, " %s  %d/%d (%d%%)\n\n", bar, ew.ClosedChildren, ew.TotalChildren, pct)
 	}
 	d.epicsView.SetText(b.String())
 }
 
 func (d *Dashboard) updateDaemonsView() {
+	t := &d.theme
 	var b strings.Builder
 	if len(d.data.Daemons) == 0 {
-		b.WriteString(" [dim]No daemons running[-]")
+		fmt.Fprintf(&b, " [%s]No daemons running[-]", t.DimTag)
 	}
 
 	for _, dm := range d.data.Daemons {
 		name := filepath.Base(dm.WorkspacePath)
-		alive := "[red]✗[-]"
+		alive := fmt.Sprintf("[%s]✗[-]", t.BlockedTag)
 		if dm.Alive {
-			alive = "[green]✓[-]"
+			alive = fmt.Sprintf("[%s]✓[-]", t.OpenTag)
 		}
-		fmt.Fprintf(&b, " %s [white]%s[-]  PID %d  %s  v%s\n",
-			alive, name, dm.PID, formatUptime(dm.UptimeSeconds), dm.Version)
+		fmt.Fprintf(&b, " %s [%s]%s[-]  PID %d  %s  v%s\n",
+			alive, t.FgTag, name, dm.PID, formatUptime(dm.UptimeSeconds), dm.Version)
 	}
 	d.daemonsView.SetText(b.String())
 }
 
-func progressBar(pct int, width int) string {
+func (d *Dashboard) progressBar(pct int, width int) string {
+	t := &d.theme
 	if pct < 0 {
 		pct = 0
 	}
@@ -593,6 +608,6 @@ func progressBar(pct int, width int) string {
 	}
 	filled := pct * width / 100
 	empty := width - filled
-	return "[green]" + strings.Repeat("█", filled) + "[-]" +
-		"[dim]" + strings.Repeat("░", empty) + "[-]"
+	return "[" + t.ReadyTag + "]" + strings.Repeat("█", filled) + "[-]" +
+		"[" + t.DimTag + "]" + strings.Repeat("░", empty) + "[-]"
 }

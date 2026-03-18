@@ -139,38 +139,6 @@ func priorityLabel(p int) string {
 	}
 }
 
-func priorityColor(p int) string {
-	switch p {
-	case 0:
-		return "red"
-	case 1:
-		return "#ff8700"
-	case 2:
-		return "yellow"
-	case 3:
-		return "green"
-	case 4:
-		return "#888888"
-	default:
-		return "white"
-	}
-}
-
-func statusColor(s string) string {
-	switch s {
-	case "open":
-		return "green"
-	case "in_progress":
-		return "#5f87ff"
-	case "blocked":
-		return "red"
-	case "closed":
-		return "#888888"
-	default:
-		return "white"
-	}
-}
-
 func statusLabel(s string) string {
 	switch s {
 	case "open":

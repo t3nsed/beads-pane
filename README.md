@@ -1,10 +1,10 @@
-# beads-pane
+# beads-pane (`bp`)
 
 Terminal dashboard for monitoring [beads](https://github.com/steveyegge/beads) issue trackers across all your repos. Read-only, zero-config after first run.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ BEADS-PANE ◆ Agent Control Pane       8 repos │ poll 30s │ 17:04:12  │
+│ BEADS-PANE ◆ Agent Control Pane    8 repos │ poll 30s │ light │ 17:04 │
 ├──────────────────────┬─────────────────────────────────────────────────┤
 │ Repositories         │ Issues · arche [254]                            │
 │                      │  ID           Title              Status Pri Type│
@@ -25,7 +25,7 @@ Terminal dashboard for monitoring [beads](https://github.com/steveyegge/beads) i
 │  ■ P1 High       15  │  ████░░░░  0/9     │    17h45m  v0.24.0        │
 │  ■ P2 Medium     12  │                    │                            │
 ├──────────────────────┴────────────────────┴────────────────────────────┤
-│ q:quit  r:refresh  Tab:next pane  ↑↓:navigate  Enter:select           │
+│ q:quit  r:refresh  t:theme  Tab:pane  ↑↓:nav                          │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,13 +35,16 @@ Terminal dashboard for monitoring [beads](https://github.com/steveyegge/beads) i
 go install github.com/t3nsed/beads-pane@latest
 ```
 
-Requires `bd` CLI: `brew install beads` or see https://github.com/steveyegge/beads
+Binary compiles as `bp`. Requires `bd` CLI: `brew install beads` or see https://github.com/steveyegge/beads
 
 ## Usage
 
 ```bash
-beads-pane
+bp                # starts in light mode (default)
+bp --theme dark   # starts in dark mode
 ```
+
+Press `t` at any time to toggle between light and dark themes.
 
 On first run, you'll be asked where to scan for repos (defaults to `$HOME`). Config is saved to:
 - macOS: `~/Library/Application Support/beads-pane/config.json`
@@ -65,6 +68,7 @@ On first run, you'll be asked where to scan for repos (defaults to `$HOME`). Con
 |-----|--------|
 | `q` | Quit |
 | `r` | Force refresh |
+| `t` | Toggle light/dark theme |
 | `Tab` / `Shift+Tab` | Cycle focus between panels |
 | `↑` `↓` | Navigate within focused panel |
 | `Enter` | Select item |
